@@ -8,6 +8,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:flutter_slidable/flutter_slidable.dart';
+import 'package:gal/gal.dart';
 
 void main() {
   runApp(const MyApp());
@@ -17,23 +19,28 @@ class Note {
   String id;
   String title;
   String content;
-  String? imagePath;
+  List<String> imagePaths;
 
-  Note({required this.id, required this.title, required this.content, this.imagePath});
+  Note({
+    required this.id,
+    required this.title,
+    required this.content,
+    this.imagePaths = const [],
+  });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'content': content,
-        'imagePath': imagePath,
-      };
+    'id': id,
+    'title': title,
+    'content': content,
+    'imagePaths': imagePaths,
+  };
 
   factory Note.fromJson(Map<String, dynamic> json) => Note(
-        id: json['id'],
-        title: json['title'],
-        content: json['content'],
-        imagePath: json['imagePath'],
-      );
+    id: json['id'],
+    title: json['title'],
+    content: json['content'],
+    imagePaths: List<String>.from(json['imagePaths'] ?? []),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -48,9 +55,7 @@ class MyApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('es', 'ES'),
-      ],
+      supportedLocales: const [Locale('es', 'ES')],
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
@@ -63,6 +68,7 @@ class MyApp extends StatelessWidget {
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
+
   final String title;
 
   @override
@@ -71,6 +77,7 @@ class MyHomePage extends StatefulWidget {
 
 class NotePage extends StatefulWidget {
   final Note? note;
+
   const NotePage({super.key, this.note});
 
   @override
@@ -80,15 +87,17 @@ class NotePage extends StatefulWidget {
 class _NotePageState extends State<NotePage> {
   late TextEditingController _titleController;
   late TextEditingController _contentController;
-  String? _imagePath;
+  List<String> _imagePaths = [];
   final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.note?.title ?? "");
-    _contentController = TextEditingController(text: widget.note?.content ?? "");
-    _imagePath = widget.note?.imagePath;
+    _contentController = TextEditingController(
+      text: widget.note?.content ?? "",
+    );
+    _imagePaths = List<String>.from(widget.note?.imagePaths ?? []);
   }
 
   @override
@@ -102,10 +111,13 @@ class _NotePageState extends State<NotePage> {
     final XFile? pickedFile = await _picker.pickImage(source: source);
     if (pickedFile != null) {
       final Directory appDir = await getApplicationDocumentsDirectory();
-      final String fileName = p.basename(pickedFile.path);
-      final File savedImage = await File(pickedFile.path).copy('${appDir.path}/$fileName');
+      final String fileName =
+          "${DateTime.now().millisecondsSinceEpoch}_${p.basename(pickedFile.path)}";
+      final File savedImage = await File(
+        pickedFile.path,
+      ).copy('${appDir.path}/$fileName');
       setState(() {
-        _imagePath = savedImage.path;
+        _imagePaths.add(savedImage.path);
       });
     }
   }
@@ -140,6 +152,47 @@ class _NotePageState extends State<NotePage> {
     );
   }
 
+  void _viewFullImage(String path) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog.fullscreen(
+        backgroundColor: Colors.black,
+        child: Stack(
+          children: [
+            Center(
+              child: InteractiveViewer(
+                child: Image.file(File(path), fit: BoxFit.contain),
+              ),
+            ),
+            Positioned(
+              top: 40,
+              right: 20,
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.download, color: Colors.white,  size: 30),
+                    onPressed: () async {
+                      try {
+                        await Gal.putImage(path);
+                        Fluttertoast.showToast(msg: "Imagen guardada en la galería");
+                      } catch (e) {
+                        Fluttertoast.showToast(msg: "Error al guardar la imagen");
+                      }
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -153,7 +206,7 @@ class _NotePageState extends State<NotePage> {
                 Navigator.pop(context, {
                   'title': _titleController.text,
                   'content': _contentController.text,
-                  'imagePath': _imagePath,
+                  'imagePaths': _imagePaths,
                 });
               } else {
                 Fluttertoast.showToast(msg: "El título no puede estar vacío");
@@ -174,27 +227,49 @@ class _NotePageState extends State<NotePage> {
               ),
             ),
             const SizedBox(height: 10),
-            if (_imagePath != null)
-              Stack(
-                alignment: Alignment.topRight,
-                children: [
-                  Container(
-                    height: 200,
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 10),
-                    child: Image.file(File(_imagePath!), fit: BoxFit.cover),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.red),
-                    onPressed: () => setState(() => _imagePath = null),
-                  ),
-                ],
+            if (_imagePaths.isNotEmpty)
+              SizedBox(
+                height: 120,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _imagePaths.length,
+                  itemBuilder: (context, index) {
+                    return Stack(
+                      alignment: Alignment.topRight,
+                      children: [
+                        GestureDetector(
+                          onTap: () => _viewFullImage(_imagePaths[index]),
+                          child: Container(
+                            margin: const EdgeInsets.only(right: 10),
+                            width: 100,
+                            height: 100,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.file(
+                                File(_imagePaths[index]),
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.remove_circle,
+                            color: Colors.red,
+                          ),
+                          onPressed: () =>
+                              setState(() => _imagePaths.removeAt(index)),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
             Row(
               children: [
                 ElevatedButton.icon(
                   onPressed: () => _showImageSourceActionSheet(context),
-                  icon: const Icon(Icons.image),
+                  icon: const Icon(Icons.add_a_photo),
                   label: const Text("Añadir Imagen"),
                 ),
               ],
@@ -222,6 +297,7 @@ class _NotePageState extends State<NotePage> {
 
 class Settings extends StatefulWidget {
   const Settings({super.key, required this.titel});
+
   final String titel;
 
   @override
@@ -245,6 +321,36 @@ class _SettingsState extends State<Settings> {
         children: [
           Card(
             child: ListTile(
+              leading: const Icon(Icons.help_outline_rounded),
+              title: const Text("Como usar"),
+              onTap: () {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text("Como usar la app"),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          "lAñade notas con el simbolo de + en el apartado principal, también puedes seleccionar distintos dias con el icono del calendario. Tienes la opcion de editar la nota si presiones sobre ella o si desplazas a la izquierda también veras la opción para eliminarla. Si mantienes pulsada sobre ella y tienes varias notas podras cambiar el orden en el que se ven. ninguna de las imagenes son recopiladas ni guardadas una ves se elimine las imagenes de las notas esas no se guardarán :D",
+                          textAlign: TextAlign.start,
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Cerrar"),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          Card(
+            child: ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text("About Me"),
               onTap: () {
@@ -255,7 +361,10 @@ class _SettingsState extends State<Settings> {
                     content: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text("Desarrollado por D3vDeft en agradecimiento a Staicy :D, contacteme en:", textAlign: TextAlign.start,),
+                        const Text(
+                          "Desarrollado por D3vDeft en agradecimiento a Staicy :D, contacteme en:",
+                          textAlign: TextAlign.start,
+                        ),
                         const SizedBox(height: 20),
                         InkWell(
                           onTap: _launchUrl,
@@ -319,9 +428,11 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _saveNotes() async {
     final prefs = await SharedPreferences.getInstance();
-    final String encoded = jsonEncode(_allNotes.map((key, value) {
-      return MapEntry(key, value.map((n) => n.toJson()).toList());
-    }));
+    final String encoded = jsonEncode(
+      _allNotes.map((key, value) {
+        return MapEntry(key, value.map((n) => n.toJson()).toList());
+      }),
+    );
     await prefs.setString('notes_data', encoded);
   }
 
@@ -330,7 +441,7 @@ class _MyHomePageState extends State<MyHomePage> {
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(1970),
-      lastDate: DateTime(2050),
+      lastDate: DateTime(3150),
       locale: const Locale('es', 'ES'),
     );
     if (picked != null && picked != _selectedDate) {
@@ -346,9 +457,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void _navigateToNotePage({Note? note}) async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => NotePage(note: note),
-      ),
+      MaterialPageRoute(builder: (context) => NotePage(note: note)),
     );
 
     if (result != null) {
@@ -359,18 +468,20 @@ class _MyHomePageState extends State<MyHomePage> {
         }
 
         if (note == null) {
-          _allNotes[dateKey]!.add(Note(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            title: result['title'],
-            content: result['content'],
-            imagePath: result['imagePath'],
-          ));
+          _allNotes[dateKey]!.add(
+            Note(
+              id: DateTime.now().millisecondsSinceEpoch.toString(),
+              title: result['title'],
+              content: result['content'],
+              imagePaths: result['imagePaths'],
+            ),
+          );
         } else {
           final index = _allNotes[dateKey]!.indexWhere((n) => n.id == note.id);
           if (index != -1) {
             _allNotes[dateKey]![index].title = result['title'];
             _allNotes[dateKey]![index].content = result['content'];
-            _allNotes[dateKey]![index].imagePath = result['imagePath'];
+            _allNotes[dateKey]![index].imagePaths = result['imagePaths'];
           }
         }
       });
@@ -387,37 +498,116 @@ class _MyHomePageState extends State<MyHomePage> {
     Fluttertoast.showToast(msg: 'Nota eliminada');
   }
 
+  void _viewFullImage(String path) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog.fullscreen(
+        backgroundColor: Colors.black,
+        child: Stack(
+          children: [
+            Center(
+              child: InteractiveViewer(
+                child: Image.file(File(path), fit: BoxFit.contain),
+              ),
+            ),
+            Positioned(
+              top: 40,
+              right: 20,
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.download, color: Colors.white, size: 30),
+                    onPressed: () async {
+                      try {
+                        await Gal.putImage(path);
+                        Fluttertoast.showToast(msg: "Imagen guardada en la galería");
+                      } catch (e) {
+                        Fluttertoast.showToast(msg: "Error al guardar la imagen");
+                      }
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateKey = _getDateKey(_selectedDate);
     final currentNotes = _allNotes[dateKey] ?? [];
 
+    final now = DateTime.now();
+    final isToday =
+        _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+
+    final appBarTitle = isToday
+        ? "${widget.title} - Hoy"
+        : "${widget.title} - ${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}";
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        title: Text("${widget.title} - ${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}"),
+        title: Text(appBarTitle),
       ),
       body: currentNotes.isEmpty
           ? const Center(child: Text("No hay notas para este día."))
-          : ListView.builder(
+          : ReorderableListView.builder(
               itemCount: currentNotes.length,
+              onReorder: (oldIndex, newIndex) {
+                setState(() {
+                  if (newIndex > oldIndex) {
+                    newIndex -= 1;
+                  }
+                  final list = _allNotes[dateKey]!;
+                  final item = list.removeAt(oldIndex);
+                  list.insert(newIndex, item);
+                });
+                _saveNotes();
+              },
               itemBuilder: (context, index) {
                 final note = currentNotes[index];
-                return Dismissible(
+                return Slidable(
                   key: Key(note.id),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    color: Colors.red,
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: const Icon(Icons.delete, color: Colors.white),
+                  endActionPane: ActionPane(
+                    motion: const ScrollMotion(),
+                    children: [
+                      SlidableAction(
+                        onPressed: (context) => _navigateToNotePage(note: note),
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        icon: Icons.edit,
+                        label: 'Editar',
+                      ),
+                      SlidableAction(
+                        onPressed: (context) => _deleteNote(note),
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        icon: Icons.delete,
+                        label: 'Eliminar',
+                      ),
+                    ],
                   ),
-                  onDismissed: (direction) {
-                    _deleteNote(note);
-                  },
                   child: ListTile(
-                    leading: note.imagePath != null
-                        ? Image.file(File(note.imagePath!), width: 50, height: 50, fit: BoxFit.cover)
+                    leading: note.imagePaths.isNotEmpty
+                        ? GestureDetector(
+                            onTap: () => _viewFullImage(note.imagePaths.first),
+                            child: Image.file(
+                              File(note.imagePaths.first),
+                              width: 50,
+                              height: 50,
+                              fit: BoxFit.cover,
+                            ),
+                          )
                         : const Icon(Icons.image_not_supported_outlined),
                     title: Text(note.title),
                     subtitle: Text(
@@ -433,7 +623,10 @@ class _MyHomePageState extends State<MyHomePage> {
       bottomNavigationBar: BottomNavigationBar(
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
         ],
         currentIndex: 0,
         onTap: (index) {
